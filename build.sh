@@ -4,30 +4,48 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
 OUTPUT_DIR="${SCRIPT_DIR}/output"
 MX_FF_SRC_DIR="${SCRIPT_DIR}/src"
 BUILD_ROOT="${MX_FF_SRC_DIR}/jni"
-
-VERSION=${VERSION:="2.5.0"}
-BUILD_NUMBER="0"
-MX_FF_SRC_URL="https://amazon-source-code-downloads.s3.us-east-1.amazonaws.com/MXPlayer/client/mxplayer-2.5.0-ffmpeg-v4.2-src.tar.gz"
 SRC_FILENAME="ffmpeg-src.tar.gz"
 
-die() {
-	echo -e "$*" >&2
-	exit 1
-}
-warn() { echo -e "$*" >&2; }
-log() { echo -e "$*"; }
+DEFAULT_VERSION="2.5.0"
+DEFAULT_URL="https://amazon-source-code-downloads.s3.us-east-1.amazonaws.com/MXPlayer/client/mxplayer-2.5.0-ffmpeg-v4.2-src.tar.gz"
+
+log_info() { echo -e "\033[36m[INFO] $*\033[0m"; }
+log_warn() { echo -e "\033[33m[WARN] $*\033[0m" >&2; }
+die() { echo -e "\033[31m[ERR] $*\033[0m" >&2; exit 1; }
+
+log_info "Checking for the latest FFmpeg source code..."
+DOWNLOAD_PAGE="https://mx.j2inter.com/download"
+DETECTED_URL=$(curl -sL "$DOWNLOAD_PAGE" | grep -oE 'https://[^"]+mxplayer-[0-9.]+-ffmpeg-[^"]+-src\.tar\.gz' | head -n 1)
+
+if [[ -n "$DETECTED_URL" ]]; then
+    DETECTED_VERSION=$(echo "$DETECTED_URL" | sed -E 's/.*mxplayer-([0-9.]+)-ffmpeg.*/\1/')
+    
+    log_info "Latest version found: $DETECTED_VERSION"
+    log_info "Source URL: $DETECTED_URL"
+    
+    MX_FF_SRC_URL="$DETECTED_URL"
+    VERSION="${VERSION:=$DETECTED_VERSION}"
+else
+    log_warn "Failed to auto-detect latest version (network error or site layout change)."
+    log_warn "Falling back to default hardcoded version: $DEFAULT_VERSION"
+    
+    MX_FF_SRC_URL="$DEFAULT_URL"
+    VERSION="${VERSION:=$DEFAULT_VERSION}"
+fi
+
+BUILD_NUMBER="0"
 
 execute() {
-	log ":==> $*\n"
+	log_info ":==> $*\n"
 	"$@" || die "failed to execute $*"
-	log ""
+	echo ""
 }
 
 if [[ ! -d "$NDK" ]]; then
 	NDK_BUILD_PATH="$(which ndk-build)"
 	if [[ -n "$NDK_BUILD_PATH" ]]; then
 		export NDK=$(dirname "$NDK_BUILD_PATH")
-		warn "NDK location auto-detected! path: $NDK"
+		log_warn "NDK location auto-detected! path: $NDK"
 	else
 		die "Unable to detect NDK!!"
 	fi
@@ -68,7 +86,7 @@ build() {
 		execute find "$TARGET" \( -iname "*.so" -or -iname "*.a" \) -not -iname "libmx*.so" -exec rm {} +
 	fi
 
-	log "========== building codec for $1 =========="
+	log_info "========== building codec for $1 =========="
 	execute "${PWD}/build-libmp3lame.sh" "$1"
 	execute "${PWD}/build-openssl.sh" "$1"
 	execute "${PWD}/build-libsmb2.sh" "$1"
@@ -99,7 +117,7 @@ execute tar --strip-components=1 -C "$MX_FF_SRC_DIR" -xzf "${SCRIPT_DIR}/${SRC_F
 
 cd "$BUILD_ROOT" || die "failed to switch to source directory"
 
-log "update config files"
+log_info "update config files"
 echo "$PWD"
 # perl -i -pe 's/(FF_FEATURES\+=\$FF_FEATURE_(DEMUXER|DECODER|MISC))/# $1/g' config-ffmpeg.sh
 perl -i -pe 's/ENABLE_ALL_DEMUXER_DECODER=false/ENABLE_ALL_DEMUXER_DECODER=true/g' config-ffmpeg.sh
@@ -135,7 +153,7 @@ if [[ $CLEAN == "true" ]] && [[ -d "$OUTPUT_DIR" ]]; then
 fi
 
 if [[ -z "${ARCH[*]}" ]]; then
-	warn "no arch specified. building all!"
+	log_warn "no arch specified. building all!"
 	ARCH=("arm64" "neon" "x86_64" "x86")
 fi
 
